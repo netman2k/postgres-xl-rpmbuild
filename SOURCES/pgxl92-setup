@@ -1,0 +1,190 @@
+#!/bin/sh
+#
+# pgxlsetup	Initialization and upgrade operations for pgxl
+
+# PGXCVERSION is the full package version, e.g., 9.0.2
+# Note: the specfile inserts the correct value during package build
+PGXCVERSION=xxxx
+# PGXCENGINE is the directory containing the postmaster executable
+# Note: the specfile inserts the correct value during package build
+PGXCENGINE=xxxx
+
+# Absorb configuration settings from the specified systemd service file,
+# or the default "pgxl" service if not specified
+SERVICE_NAME="$2"
+if [ x"$SERVICE_NAME" = x ]
+then
+    SERVICE_NAME=pgxl9.2
+fi
+
+if [ -f "/etc/init.d/${SERVICE_NAME}.service" ]
+then
+    SERVICE_FILE="/etc/init.d/${SERVICE_NAME}.service"
+##elif [ -f "/lib/systemd/system/${SERVICE_NAME}.service" ]
+##then
+##    SERVICE_FILE="/lib/systemd/system/${SERVICE_NAME}.service"
+else
+    echo "Could not find systemd unit file ${SERVICE_NAME}.service"
+    exit 1
+fi
+
+# Get port number and data directory from the service file
+PGXCPORT=`sed -n 's/Environment=PGXCPORT=//p' "${SERVICE_FILE}"`
+PGXCDATA=`sed -n 's/Environment=PGXCDATA=//p' "${SERVICE_FILE}"`
+
+# Log file for initdb
+PGLOG=/var/lib/pgxl/9.2/initdb.log
+
+export PGXCPORT
+export PGXCDATA
+
+# For SELinux we need to use 'runuser' not 'su'
+if [ -x /sbin/runuser ]
+then
+    SU=runuser
+else
+    SU=su
+fi
+
+script_result=0
+
+# code shared between initdb and upgrade actions
+perform_initdb(){
+	if [ ! -e "$PGXCDATA" -a ! -h "$PGXCDATA" ]
+	then
+		mkdir -p "$PGXCDATA" || return 1
+		chown pgxl:pgxl "$PGXCDATA"
+		chmod go-rwx "$PGXCDATA"
+	fi
+	# Clean up SELinux tagging for PGXCDATA
+	[ -x /sbin/restorecon ] && /sbin/restorecon "$PGXCDATA"
+
+	# Create the initdb log file if needed
+	if [ ! -e "$PGLOG" -a ! -h "$PGLOG" ]
+	then
+		touch "$PGLOG" || return 1
+		chown pgxl:pgxl "$PGLOG"
+		chmod go-rwx "$PGLOG"
+		[ -x /sbin/restorecon ] && /sbin/restorecon "$PGLOG"
+	fi
+
+	# Initialize the database
+	$SU -l pgxl -c "$PGXCENGINE/initdb --PGXCDATA='$PGXCDATA' --auth='ident'" >> "$PGLOG" 2>&1 < /dev/null
+
+	# Create directory for postmaster log files
+	mkdir "$PGXCDATA/pg_log"
+	chown pgxl:pgxl "$PGXCDATA/pg_log"
+	chmod go-rwx "$PGXCDATA/pg_log"
+
+	if [ -f "$PGXCDATA/PG_VERSION" ]
+	then
+	    return 0
+	fi
+	return 1
+}
+
+initdb(){
+    if [ -f "$PGXCDATA/PG_VERSION" ]
+    then
+	echo $"Data directory is not empty!"
+	echo
+	script_result=1
+    else
+	echo -n $"Initializing database ... "
+	if perform_initdb
+	then
+	    echo $"OK"
+	else
+	    echo $"failed, see $PGLOG"
+	    script_result=1
+	fi
+	echo
+    fi
+}
+
+upgrade(){
+    # must see previous version in PG_VERSION
+    if [ ! -f "$PGXCDATA/PG_VERSION" -o \
+	 x`cat "$PGXCDATA/PG_VERSION"` != x"$PREVMAJORVERSION" ]
+    then
+	echo
+	echo $"Cannot upgrade because database is not of version $PREVMAJORVERSION."
+	echo
+	exit 1
+    fi
+    if [ ! -x "$PGXCENGINE/pg_upgrade" ]
+    then
+	echo
+	echo $"Please install the pgxlupgrade RPM."
+	echo
+	exit 5
+    fi
+
+    # Make sure service is stopped
+    # Using service here makes it work both with systemd and other init systems
+    service "$SERVICE_NAME" stop
+
+    # Set up log file for pg_upgrade
+    rm -f "$PGUPLOG"
+    touch "$PGUPLOG" || exit 1
+    chown pgxl:pgxl "$PGUPLOG"
+    chmod go-rwx "$PGUPLOG"
+    [ -x /sbin/restorecon ] && /sbin/restorecon "$PGUPLOG"
+
+    # Move old DB to PGXCDATAOLD
+    PGXCDATAOLD="${PGXCDATA}-old"
+    rm -rf "$PGXCDATAOLD"
+    mv "$PGXCDATA" "$PGXCDATAOLD" || exit 1
+
+    echo -n $"Upgrading database: "
+
+    # Create empty new-format database
+    if perform_initdb
+    then
+	# Do the upgrade
+	$SU -l pgxl -c "$PGXCENGINE/pg_upgrade \
+		'--old-bindir=$PREVPGXCENGINE' \
+		'--new-bindir=$PGXCENGINE' \
+		'--old-datadir=$PGXCDATAOLD' \
+		'--new-datadir=$PGXCDATA' \
+		--link \
+		'--old-port=$PGXCPORT' '--new-port=$PGXCPORT' \
+		--user=pgxl" >> "$PGUPLOG" 2>&1 < /dev/null
+	if [ $? -ne 0 ]
+	then
+	    # pg_upgrade failed
+	    script_result=1
+	fi
+    else
+	# initdb failed
+	script_result=1
+    fi
+
+    if [ $script_result -eq 0 ]
+    then
+	    echo $"OK"
+    else
+	    # Clean up after failure
+	    rm -rf "$PGXCDATA"
+	    mv "$PGXCDATAOLD" "$PGXCDATA"
+
+	    echo $"failed"
+    fi
+    echo
+    echo $"See $PGUPLOG for details."
+}
+
+# See how we were called.
+case "$1" in
+  initdb)
+	initdb
+	;;
+  upgrade)
+	upgrade
+	;;
+  *)
+	echo $"Usage: $0 {initdb|upgrade} [ service_name ]"
+	exit 2
+esac
+
+exit $script_result
