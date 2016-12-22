@@ -405,6 +405,9 @@ make DESTDIR=%{buildroot} install
 
 mkdir -p %{buildroot}%{pgxlbaseinstdir}/share/extension/
 make -C contrib DESTDIR=%{buildroot} install
+
+mv %{buildroot}/usr/share/doc/postgresql/extension/*.example %{buildroot}%{pgxlbaseinstdir}/share/extension/
+
 %if %uuid
 make -C contrib/uuid-ossp DESTDIR=%{buildroot} install
 %endif
@@ -751,6 +754,7 @@ rm -rf %{buildroot}
 %{pgxlbaseinstdir}/lib/pg_trgm.so
 %{pgxlbaseinstdir}/lib/refint.so
 %{pgxlbaseinstdir}/lib/seg.so
+%{pgxlbaseinstdir}/lib/sepgsql.so
 %{pgxlbaseinstdir}/lib/tablefunc.so
 %{pgxlbaseinstdir}/lib/timetravel.so
 %{pgxlbaseinstdir}/lib/unaccent.so
@@ -763,12 +767,20 @@ rm -rf %{buildroot}
 #%{pgxlbaseinstdir}/share/pgxc/extension/
 %{pgxlbaseinstdir}/share/extension/
 %{pgxlbaseinstdir}/bin/oid2name
-%{pgxlbaseinstdir}/bin/pgbench
 %{pgxlbaseinstdir}/bin/pgxc_clean
 %{pgxlbaseinstdir}/bin/vacuumlo
-%{pgxlbaseinstdir}/bin/pg_archivecleanup
 %{pgxlbaseinstdir}/bin/pg_standby
-%{pgxlbaseinstdir}/bin/pg_upgrade
+%{pgxlbaseinstdir}/bin/pgxc_monitor
+%{pgxlbaseinstdir}/share/man/man1/oid2name.1
+%{pgxlbaseinstdir}/share/man/man1/pg_isready.1
+%{pgxlbaseinstdir}/share/man/man1/pg_receivexlog.1
+%{pgxlbaseinstdir}/share/man/man1/pg_recvlogical.1
+%{pgxlbaseinstdir}/share/man/man1/pg_standby.1
+%{pgxlbaseinstdir}/share/man/man1/pg_test_*
+%{pgxlbaseinstdir}/share/man/man1/pg_test_*
+%{pgxlbaseinstdir}/share/man/man1/vacuumlo.1
+%{pgxlbaseinstdir}/share/contrib/sepgsql.sql
+
 
 %files libs -f pg_libpq5.lst
 #%defattr(-,root,root)
@@ -784,7 +796,7 @@ rm -rf %{buildroot}
 %files server -f pg_server.lst
 %defattr(-,pgxl,pgxl)
 #%defattr(-,root,root)
-#%{_unitdir}/pgxl-%{majorversion}.service
+%{_unitdir}/pgxl-%{majorversion}.service
 %{pgxlbaseinstdir}/bin/pgxl%{packageversion}-setup
 %if %pam
 %config(noreplace) /etc/pam.d/pgxl%{packageversion}
@@ -795,11 +807,18 @@ rm -rf %{buildroot}
 %{pgxlbaseinstdir}/bin/pg_controldata
 %{pgxlbaseinstdir}/bin/pg_ctl
 %{pgxlbaseinstdir}/bin/pg_resetxlog
+%{pgxlbaseinstdir}/bin/pg_isready
+%{pgxlbaseinstdir}/bin/pg_recvlogical
+%{pgxlbaseinstdir}/bin/pg_rewind
+%{pgxlbaseinstdir}/bin/pg_xlogdump
 %{pgxlbaseinstdir}/bin/postgres
 %{pgxlbaseinstdir}/bin/postmaster
 %{pgxlbaseinstdir}/bin/pgxc_ctl
 %{pgxlbaseinstdir}/bin/pg_receivexlog
 %{pgxlbaseinstdir}/bin/pg_test_timing
+%{pgxlbaseinstdir}/bin/pg_upgrade
+%{pgxlbaseinstdir}/bin/pgbench
+%{pgxlbaseinstdir}/bin/pg_archivecleanup
 %{pgxlbaseinstdir}/share/storm_catalog.sql
 %{pgxlbaseinstdir}/share/man/man1/initdb.*
 %{pgxlbaseinstdir}/share/man/man1/pg_controldata.*
@@ -807,6 +826,20 @@ rm -rf %{buildroot}
 %{pgxlbaseinstdir}/share/man/man1/pg_resetxlog.*
 %{pgxlbaseinstdir}/share/man/man1/postgres.*
 %{pgxlbaseinstdir}/share/man/man1/postmaster.*
+%{pgxlbaseinstdir}/share/man/man1/pg_upgrade.1
+%{pgxlbaseinstdir}/share/man/man1/pg_xlogdump.1
+%{pgxlbaseinstdir}/share/man/man1/pgbench.1
+%{pgxlbaseinstdir}/share/man/man1/pg_archivecleanup.1
+%{pgxlbaseinstdir}/share/man/man1/pg_rewind.1
+%{pgxlbaseinstdir}/share/locale/de/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/es/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/fr/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/it/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/ko/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/pl/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/pt_BR/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/ru/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgxlbaseinstdir}/share/locale/zh_CN/LC_MESSAGES/pg_rewind-9.5.mo
 %{pgxlbaseinstdir}/share/postgres.bki
 %{pgxlbaseinstdir}/share/postgres.description
 %{pgxlbaseinstdir}/share/postgres.shdescription
