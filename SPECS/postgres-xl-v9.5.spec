@@ -513,6 +513,9 @@ install -m 700 %{SOURCE9} %{buildroot}/etc/ld.so.conf.d/
   rm -f GNUmakefile Makefile *.o
   chmod 0755 pg_regress regress.so
   popd
+  # clean up binary
+  rm src/test/regress/pg_regress
+
   cp %{SOURCE4} %{buildroot}%{pgbaseinstdir}/lib/test/regress/Makefile
   chmod 0644 %{buildroot}%{pgbaseinstdir}/lib/test/regress/Makefile
 %endif
@@ -654,7 +657,7 @@ fi
 %{_sbindir}/update-alternatives --install /usr/bin/droplang   pgxl-droplang   %{pgbaseinstdir}/bin/droplang 100
 %{_sbindir}/update-alternatives --install /usr/bin/dropuser   pgxl-dropuser   %{pgbaseinstdir}/bin/dropuser 100
 %{_sbindir}/update-alternatives --install /usr/bin/pg_basebackup pgxl_basebackup  %{pgbaseinstdir}/bin/pg_basebackup 100
-%{_sbindir}/update-alternatives --install /usr/bin/pg_basebackupman pgxl_basebackupman  %{pgbaseinstdir}/bin/pg_basebackupman 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_basebackupman pgxl_basebackupman  %{pgbaseinstdir}/share/man/man1/pg_basebackup.1 100
 %{_sbindir}/update-alternatives --install /usr/bin/pg_dump    pgxl-pg_dump    %{pgbaseinstdir}/bin/pg_dump 100
 %{_sbindir}/update-alternatives --install /usr/bin/pg_dumpall pgxl-pg_dumpall %{pgbaseinstdir}/bin/pg_dumpall 100
 %{_sbindir}/update-alternatives --install /usr/bin/pg_restore pgxl-pg_restore %{pgbaseinstdir}/bin/pg_restore 100
@@ -675,7 +678,7 @@ fi
 %{_sbindir}/update-alternatives --install /usr/share/man/man1/vacuumdb.1   pgxl-vacuumdbman   %{pgbaseinstdir}/share/man/man1/vacuumdb.1 100
 
 %post libs
-%{_sbindir}/update-alternatives --install /etc/ld.so.conf.d/pgxl-libs.conf   pgxl-ld-conf   %{pgbaseinstdir}/share/pgxl-%{majorversion}-libs.conf %{packageversion}0
+#%{_sbindir}/update-alternatives --install /etc/ld.so.conf.d/pgxl-libs.conf   pgxl-ld-conf   %{pgbaseinstdir}/share/pgxl-%{majorversion}-libs.conf %{packageversion}0
 /sbin/ldconfig
 
 # Drop alternatives entries for common binaries and man files
@@ -713,9 +716,8 @@ if [ "$1" -eq 0 ]
     %{_sbindir}/update-alternatives --remove pgxl-vacuumdbman       %{pgbaseinstdir}/share/man/man1/vacuumdb.1
 fi
 
-%postun libs
-if [ "$1" -eq 0 ];then
-  %{_sbindir}/update-alternatives --remove pgxl-ld-conf          %{pgbaseinstdir}/share/pgxl-%{majorversion}-libs.conf
+#if [ "$1" -eq 0 ];then
+  rm -f /etc/ld.so.conf.d/pgxl-%{majorversion}-libs.conf
   /sbin/ldconfig
 fi
 
