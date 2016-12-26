@@ -20,30 +20,46 @@
 %define oname postgres-xl
 %define pgxlbaseinstdir /usr/postgres-xl-%{majorversion}
 
-%{!?test:%define test 0}
-%{!?plpython:%define plpython 1}
-%{!?pltcl:%define pltcl 1}
-%{!?plperl:%define plperl 1}
-%{!?ssl:%define ssl 1}
-%{!?intdatetimes:%define intdatetimes 1}
-%{!?kerberos:%define kerberos 1}
-%{!?nls:%define nls 1}
-%{!?xml:%define xml 1}
-%{!?pam:%define pam 1}
-%{!?disablepgfts:%define disablepgfts 0}
-%{!?runselftest:%define runselftest 0}
-%{!?uuid:%define uuid 1}
-%{!?ldap:%define ldap 1}
-%{!?selinux:%define selinux 1}
+%{!?disablepgfts:%global disablepgfts 0}
+%{!?intdatetimes:%global intdatetimes 1}
+%{!?kerberos:%global kerberos 1}
+%{!?ldap:%global ldap 1}
+%{!?nls:%global nls 1}
+%{!?pam:%global pam 1}
+%{!?plpython:%global plpython 1}
+%if 0%{?fedora} > 21
+%{!?plpython3:%global plpython3 1}
+%else
+%{!?plpython3:%global plpython3 0}
+%endif
+%{!?pltcl:%global pltcl 1}
+%{!?plperl:%global plperl 1}
+%{!?ssl:%global ssl 1}
+%{!?test:%global test 1}
+%{!?runselftest:%global runselftest 0}
+%{!?uuid:%global uuid 1}
+%{!?xml:%global xml 1}
+%if 0%{?rhel} && 0%{?rhel} <= 6
+%{!?systemd_enabled:%global systemd_enabled 0}
+%{!?sdt:%global sdt 0}
+%{!?selinux:%global selinux 0}
+%else
+%{!?systemd_enabled:%global systemd_enabled 1}
+%{!?sdt:%global sdt 1}
+%{!?selinux:%global selinux 1}
+%endif
+%if 0%{?fedora} > 23
+%global _hardened_build 1
+%endif
 
 Summary:  Postgres-XL client programs and libraries
 Name:   %{oname}%{packageversion}
 Version:  9.5
 #Release: 1PGDG%{?dist}
-Release:  1.4
+Release:  1.4%{?dist}
 License:  PostgreSQL
 Group:    Applications/Databases
-Url:    http://www.postgres-xl.org/ 
+Url:      http://www.postgres-xl.org/ 
 
 Source0:  postgres-xl-9.5r1.4.tar.gz
 Source4:  Makefile.regress
