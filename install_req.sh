@@ -1,6 +1,10 @@
 #!/bin/bash
+yum install rpm-build -y
+yum install @development -y
+
+yum install readline-devel -y
 yum install perl-ExtUtils-Embed.noarch -y
-perl-ExtUtils-MakeMaker.noarch -y
+yum install perl-ExtUtils-MakeMaker.noarch -y
 yum install python-devel -y
 yum install tcl-devel -y
 yum install openssl-devel -y
