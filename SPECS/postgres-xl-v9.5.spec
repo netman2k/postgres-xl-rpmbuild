@@ -18,7 +18,7 @@
 %define pgmajorversion 9.5
 %define packageversion 95 
 %define oname postgres-xl
-%define pgxlbaseinstdir /usr/postgres-xl-%{majorversion}
+%define pgbaseinstdir /usr/postgres-xl-%{majorversion}
 
 %{!?disablepgfts:%global disablepgfts 0}
 %{!?intdatetimes:%global intdatetimes 1}
@@ -27,11 +27,6 @@
 %{!?nls:%global nls 1}
 %{!?pam:%global pam 1}
 %{!?plpython:%global plpython 1}
-%if 0%{?fedora} > 21
-%{!?plpython3:%global plpython3 1}
-%else
-%{!?plpython3:%global plpython3 0}
-%endif
 %{!?pltcl:%global pltcl 1}
 %{!?plperl:%global plperl 1}
 %{!?ssl:%global ssl 1}
@@ -67,8 +62,7 @@ Source5:  pg_config.h
 Source6:  README.rpm-dist
 Source7:  ecpg_config.h
 Source9:  pgxl-%{majorversion}-libs.conf
-Source12: postgresql-%{majorversion}-A4.pdf 
-#http://www.postgres-xl.org/docs/pdf/%{oname}-%{majorversion}-A4.pdf
+Source12: http://www.postgresql.org/files/documentation/pdf/%{majorversion}/postgresql-%{majorversion}-A4.pdf
 Source14: pgxl.pam
 Source16: filter-requires-perl-Pg.sh
 Source17: pgxl%{packageversion}-setup
@@ -119,7 +113,7 @@ BuildRequires:  pam-devel
 %endif
 
 %if %uuid
-BuildRequires:  uuid-devel
+BuildRequires:  libuuid-devel
 %endif
 
 %if %ldap
@@ -131,7 +125,24 @@ BuildRequires: libselinux >= 2.0.93
 BuildRequires: selinux-policy >= 3.9.13
 %endif
 
+%if %{systemd_enabled}
+BuildRequires:          systemd
+# We require this to be present for %%{_prefix}/lib/tmpfiles.d
+Requires:               systemd
+Requires(post):         systemd-sysv
+Requires(post):         systemd
+Requires(preun):        systemd
+Requires(postun):       systemd
+%else
+Requires(post):         chkconfig
+Requires(preun):        chkconfig
+# This is for /sbin/service
+Requires(preun):        initscripts
+Requires(postun):       initscripts
+%endif
+
 Requires: %{name}-libs = %{version}-%{release}
+
 Requires(post): %{_sbindir}/update-alternatives
 Requires(postun): %{_sbindir}/update-alternatives
 
@@ -150,15 +161,15 @@ postgres-xl-server sub-package.
 
 If you want to manipulate a Postgres-XL database on a local or remote Postgres-XL
 server, you need this package. You also need to install this package
-if you're installing the pgxl%{majorversion}-server package.
+if you're installing the pgxl%{packageversion}-server package.
 
 %package libs
-Summary:  The shared libraries required for any Postgres-XL clients
-Group:    Applications/Databases
-Provides: libpq.so
+Summary:        The shared libraries required for any Postgres-XL clients
+Group:          Applications/Databases
+Provides:       postgres-xl-libs
 
 %description libs
-The pgxl%{majorversion}-libs package provides the essential shared libraries for any
+The pgxl%{packageversion}-libs package provides the essential shared libraries for any
 Postgres-XL client program or interface. You will need to install this package
 to use any other Postgres-XL package or any clients that need to connect to a
 Postgres-XL server.
@@ -167,13 +178,20 @@ Postgres-XL server.
 Summary:  The programs needed to create and run a Postgres-XL server
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
-Requires(pre):  /usr/sbin/useradd
+Requires(pre):  /usr/sbin/useradd, /usr/sbin/groupadd
+# for /sbin/ldconfig
+Requires(post):         glibc
+Requires(postun):       glibc
+%if %{systemd_enabled}
 # pre/post stuff needs systemd too
-##Requires(post):   systemd-units
-##Requires(preun):  systemd-units
-##Requires(postun): systemd-units
-
+Requires(post):   systemd-units
+Requires(preun):  systemd-units
+Requires(postun): systemd-units
+%else
+Requires: /usr/sbin/useradd /sbin/chkconfig
+%endif
 Requires: %{name} = %{version}-%{release}
+Provides: postgres-xl-server
 
 %description server
 Postgres-XL is an advanced Object-Relational database management system (DBMS).
@@ -184,6 +202,7 @@ and maintain Postgres-XL databases.
 %package docs
 Summary:  Extra documentation for Postgres-XL
 Group:    Applications/Databases
+Provides: postgres-xl-docs
 
 %description docs
 The pgxl%{majorversion}-docs package includes the SGML source for the documentation
@@ -197,6 +216,7 @@ Summary:  Contributed source and binaries distributed with Postgres-XL
 Group:    Applications/Databases
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Provides: postgres-xl-contrib
 
 %description contrib
 The postgres-xl-contrib package contains various extension modules that are
@@ -207,6 +227,7 @@ Summary:  Postgres-XL development header files and libraries
 Group:    Development/Libraries
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Provides: postgres-xl-devel
 
 %description devel
 The pgxl%{majorversion}-devel package contains the header files and libraries
@@ -220,20 +241,22 @@ Summary:  Global Transaction Manager for Postgres-XL
 Group:    Applications/Databases
 Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Provides: postgres-xl-gtm
 
 %description gtm
 The pgxl%{majorversion}-gtm package contains gtm binaries.
 
 %if %plperl
 %package plperl
-Summary:  The Perl procedural language for Postgres-XL
-Group:    Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
-Requires: perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
+Summary:        The Perl procedural language for Postgres-XL
+Group:          Applications/Databases
+Requires:       %{name}-server%{?_isa} = %{version}-%{release}
+Requires:       perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
 %ifarch ppc ppc64
 BuildRequires:  perl-devel
 %endif
-Obsoletes:  pgxl%{majorversion}-pl
+Obsoletes:      postgres-xl%{packageversion}-pl
+Provides:       postgres-xl-plperl
 
 %description plperl
 The pgxl%{majorversion}-plperl package contains the PL/Perl procedural language,
@@ -244,11 +267,12 @@ Install this if you want to write database functions in Perl.
 
 %if %plpython
 %package plpython
-Summary:  The Python procedural language for Postgres-XL
-Group:    Applications/Databases
+Summary:    The Python procedural language for Postgres-XL
+Group:      Applications/Databases
 Requires:   %{name}%{?_isa} = %{version}-%{release}
 Requires:   %{name}-server%{?_isa} = %{version}-%{release}
 Obsoletes:  %{name}-pl
+Provides:   postgres-xl-plpython
 
 %description plpython
 The pgxl%{majorversion}-plpython package contains the PL/Python procedural language,
@@ -259,11 +283,12 @@ Install this if you want to write database functions in Python.
 
 %if %pltcl
 %package pltcl
-Summary:  The Tcl procedural language for Postgres-XL
-Group:    Applications/Databases
-Requires: %{name}-%{?_isa} = %{version}-%{release}
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
+Summary:    The Tcl procedural language for Postgres-XL
+Group:      Applications/Databases
+Requires:   %{name}-%{?_isa} = %{version}-%{release}
+Requires:   %{name}-server%{?_isa} = %{version}-%{release}
 Obsoletes:  %{name}-pl
+Provides:   postgres-xl-pltcl
 
 %description pltcl
 Postgres-XL is an advanced Object-Relational database management
@@ -273,10 +298,11 @@ for the backend.
 
 %if %test
 %package test
-Summary:  The test suite distributed with Postgres-XL
-Group:    Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
-Requires: %{name}-devel%{?_isa} = %{version}-%{release}
+Summary:    The test suite distributed with Postgres-XL
+Group:      Applications/Databases
+Requires:   %{name}-server%{?_isa} = %{version}-%{release}
+Requires:   %{name}-devel%{?_isa} = %{version}-%{release}
+Provides:   postgres-xl-test
 
 %description test
 The Postgres-XL-test package contains files needed for various tests for the
@@ -288,7 +314,8 @@ benchmarks.
 
 %prep
 #%setup -q -n postgres-xl
-%setup -q -n postgres-xl-%{majorversion}%{releaseversion}
+#%setup -q -n postgres-xl-%{majorversion}%{releaseversion}
+%setup -q -n %{oname}-%{majorversion}%{releaseversion}
 #%patch1 -p1
 %patch3 -p1
 # patch5 is applied later
@@ -325,14 +352,10 @@ LDFLAGS="-Wl,--as-needed"; export LDFLAGS
 
 export LIBNAME=%{_lib}
 ./configure --enable-rpath \
-  --prefix=%{pgxlbaseinstdir} \
-  --includedir=%{pgxlbaseinstdir}/include \
-  --mandir=%{pgxlbaseinstdir}/share/man \
-  --datadir=%{pgxlbaseinstdir}/share \
-  --libdir=%{pgxlbaseinstdir}/lib/ \
-  --with-system-tzdata=%{_datadir}/zoneinfo \
-  --sysconfdir=/etc/sysconfig/pgxl \
-  --docdir=%{_docdir} \
+  --prefix=%{pgbaseinstdir} \
+  --includedir=%{pgbaseinstdir}/include \
+  --mandir=%{pgbaseinstdir}/share/man \
+  --datadir=%{pgbaseinstdir}/share \
 %if %beta
   --enable-debug \
   --enable-cassert \
@@ -361,6 +384,9 @@ export LIBNAME=%{_lib}
 %if %nls
   --enable-nls \
 %endif
+%if %sdt
+        --enable-dtrace \
+%endif
 %if !%intdatetimes
   --disable-integer-datetimes \
 %endif
@@ -368,7 +394,7 @@ export LIBNAME=%{_lib}
   --disable-thread-safety \
 %endif
 %if %uuid
-  --with-ossp-uuid \
+  --with-uuid=e2fs \
 %endif
 %if %xml
   --with-libxml \
@@ -378,8 +404,12 @@ export LIBNAME=%{_lib}
   --with-ldap \
 %endif
 %if %selinux
-  --with-selinux
+  --with-selinux \
 %endif
+  --with-system-tzdata=%{_datadir}/zoneinfo \
+  --sysconfdir=/etc/sysconfig/pgsql \
+  --docdir=%{pgbaseinstdir}/doc \
+  --htmldir=%{pgbaseinstdir}/doc/html
 
 make %{?_smp_mflags} all
 make %{?_smp_mflags} -C contrib all
@@ -388,7 +418,7 @@ make %{?_smp_mflags} -C contrib/uuid-ossp all
 %endif
 
 # Have to hack makefile to put correct path into tutorial scripts
-sed "s|C=\`pwd\`;|C=%{pgxlbaseinstdir}/lib/tutorial;|" < src/tutorial/Makefile > src/tutorial/GNUmakefile
+sed "s|C=\`pwd\`;|C=%{pgbaseinstdir}/lib/tutorial;|" < src/tutorial/Makefile > src/tutorial/GNUmakefile
 make %{?_smp_mflags} -C src/tutorial NO_PGXS=1 all
 rm -f src/tutorial/GNUmakefile
 
@@ -419,10 +449,10 @@ rm -rf %{buildroot}
 
 make DESTDIR=%{buildroot} install
 
-mkdir -p %{buildroot}%{pgxlbaseinstdir}/share/extension/
+mkdir -p %{buildroot}%{pgbaseinstdir}/share/extension/
 make -C contrib DESTDIR=%{buildroot} install
 
-mv %{buildroot}/usr/share/doc/postgresql/extension/*.example %{buildroot}%{pgxlbaseinstdir}/share/extension/
+#mv %{buildroot}%{pgbaseinstdir}/doc/extension/*.example %{buildroot}%{pgbaseinstdir}/share/extension/
 
 %if %uuid
 make -C contrib/uuid-ossp DESTDIR=%{buildroot} install
@@ -432,12 +462,12 @@ make -C contrib/uuid-ossp DESTDIR=%{buildroot} install
 # we only apply this to known Red Hat multilib arches, per bug #177564
 case `uname -i` in
   i386 | x86_64 | ppc | ppc64 | s390 | s390x)
-    mv %{buildroot}%{pgxlbaseinstdir}/include/pg_config.h %{buildroot}%{pgxlbaseinstdir}/include/pg_config_`uname -i`.h
-    install -m 644 %{SOURCE5} %{buildroot}%{pgxlbaseinstdir}/include/
-    #mv %{buildroot}%{pgxlbaseinstdir}/include/server/pg_config.h %{buildroot}%{pgxlbaseinstdir}/include/server/pg_config_`uname -i`.h
-    #install -m 644 %{SOURCE5} %{buildroot}%{pgxlbaseinstdir}/include/server/
-    mv %{buildroot}%{pgxlbaseinstdir}/include/ecpg_config.h %{buildroot}%{pgxlbaseinstdir}/include/ecpg_config_`uname -i`.h
-    install -m 644 %{SOURCE7} %{buildroot}%{pgxlbaseinstdir}/include/
+    %{__mv} %{buildroot}%{pgbaseinstdir}/include/pg_config.h %{buildroot}%{pgbaseinstdir}/include/pg_config_`uname -i`.h
+    install -m 644 %{SOURCE5} %{buildroot}%{pgbaseinstdir}/include/
+    %{__mv}  %{buildroot}%{pgbaseinstdir}/include/server/pg_config.h %{buildroot}%{pgbaseinstdir}/include/server/pg_config_`uname -i`.h
+    install -m 644 %{SOURCE5} %{buildroot}%{pgbaseinstdir}/include/server/
+    %{__mv} %{buildroot}%{pgbaseinstdir}/include/ecpg_config.h %{buildroot}%{pgbaseinstdir}/include/ecpg_config_`uname -i`.h
+    install -m 644 %{SOURCE7} %{buildroot}%{pgbaseinstdir}/include/
     ;;
   *)
   ;;
@@ -447,7 +477,7 @@ esac
 sed -e 's|^PGVERSION=.*$|PGVERSION=%{version}|' \
         -e 's|^PGENGINE=.*$|PGENGINE=/usr/pgxl-%{majorversion}/bin|' \
         <%{SOURCE17} >pgxl%{packageversion}-setup
-install -m 755 pgxl%{packageversion}-setup %{buildroot}%{pgxlbaseinstdir}/bin/pgxl%{packageversion}-setup
+install -m 755 pgxl%{packageversion}-setup %{buildroot}%{pgbaseinstdir}/bin/pgxl%{packageversion}-setup
 
 install -d %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE18} %{buildroot}%{_unitdir}/pgxl-%{majorversion}.service
@@ -474,31 +504,31 @@ install -m 700 %{SOURCE9} %{buildroot}/etc/ld.so.conf.d/
   # tests. There are many files included here that are unnecessary,
   # but include them anyway for completeness.  We replace the original
   # Makefiles, however.
-  mkdir -p %{buildroot}%{pgxlbaseinstdir}/lib/test
-  cp -a src/test/regress %{buildroot}%{pgxlbaseinstdir}/lib/test
-  install -m 0755 contrib/spi/refint.so %{buildroot}%{pgxlbaseinstdir}/lib/test/regress
-  install -m 0755 contrib/spi/autoinc.so %{buildroot}%{pgxlbaseinstdir}/lib/test/regress
-  pushd  %{buildroot}%{pgxlbaseinstdir}/lib/test/regress
+  mkdir -p %{buildroot}%{pgbaseinstdir}/lib/test
+  cp -a src/test/regress %{buildroot}%{pgbaseinstdir}/lib/test
+  install -m 0755 contrib/spi/refint.so %{buildroot}%{pgbaseinstdir}/lib/test/regress
+  install -m 0755 contrib/spi/autoinc.so %{buildroot}%{pgbaseinstdir}/lib/test/regress
+  pushd  %{buildroot}%{pgbaseinstdir}/lib/test/regress
   strip *.so
   rm -f GNUmakefile Makefile *.o
   chmod 0755 pg_regress regress.so
   popd
-  cp %{SOURCE4} %{buildroot}%{pgxlbaseinstdir}/lib/test/regress/Makefile
-  chmod 0644 %{buildroot}%{pgxlbaseinstdir}/lib/test/regress/Makefile
+  cp %{SOURCE4} %{buildroot}%{pgbaseinstdir}/lib/test/regress/Makefile
+  chmod 0644 %{buildroot}%{pgbaseinstdir}/lib/test/regress/Makefile
 %endif
 
 # Fix some more documentation
 # gzip doc/internals.ps
 cp %{SOURCE6} README.rpm-dist
-mkdir -p %{buildroot}%{pgxlbaseinstdir}/share/doc/html
+mkdir -p %{buildroot}%{pgbaseinstdir}/share/doc/html
 mv doc/src/sgml/html doc
-mkdir -p %{buildroot}%{pgxlbaseinstdir}/share/man/
-mv doc/src/sgml/man{1,3,7}  %{buildroot}%{pgxlbaseinstdir}/share/man/
+mkdir -p %{buildroot}%{pgbaseinstdir}/share/man/
+mv doc/src/sgml/man{1,3,7}  %{buildroot}%{pgbaseinstdir}/share/man/
 rm -rf %{buildroot}%{_docdir}/pgxl
 
 # Temp measure for some lib files. This needs to be fixed upstream: 
-#mv %{buildroot}%{pgxlbaseinstdir}/lib/pgxl/* %{buildroot}%{pgxlbaseinstdir}/lib/
-###mv %{buildroot}%{pgxlbaseinstdir}/lib/pgxl/* %{buildroot}%{pgxlbaseinstdir}/lib/
+#mv %{buildroot}%{pgbaseinstdir}/lib/pgxl/* %{buildroot}%{pgbaseinstdir}/lib/
+###mv %{buildroot}%{pgbaseinstdir}/lib/pgxl/* %{buildroot}%{pgbaseinstdir}/lib/
 
 # initialize file lists
 cp /dev/null main.lst
@@ -529,6 +559,7 @@ cp /dev/null plpython.lst
 %find_lang pg_ctl-%{pgmajorversion}
 %find_lang pg_dump-%{pgmajorversion}
 %find_lang pg_resetxlog-%{pgmajorversion}
+%find_lang pg_rewind-%{majorversion}
 %find_lang pgscripts-%{pgmajorversion}
 %if %plperl
 %find_lang plperl-%{pgmajorversion}
@@ -552,26 +583,34 @@ cat pg_config-%{pgmajorversion}.lang ecpg-%{pgmajorversion}.lang ecpglib6-%{pgma
 cat initdb-%{pgmajorversion}.lang pg_ctl-%{pgmajorversion}.lang psql-%{pgmajorversion}.lang pg_dump-%{pgmajorversion}.lang pg_basebackup-%{pgmajorversion}.lang pgscripts-%{pgmajorversion}.lang > pg_main.lst
 cat postgres-%{pgmajorversion}.lang pg_resetxlog-%{pgmajorversion}.lang pg_controldata-%{pgmajorversion}.lang plpgsql-%{pgmajorversion}.lang > pg_server.lst
 
-%post libs -p /sbin/ldconfig 
-%postun libs -p /sbin/ldconfig 
+#%post libs -p /sbin/ldconfig 
+#%postun libs -p /sbin/ldconfig 
 
 %pre server
-groupadd -r pgxl >/dev/null 2>&1 || :
-useradd -m -g pgxl -r -s /bin/bash \
-        -c "pgxl Server" pgxl >/dev/null 2>&1 || :
+groupadd -g 26 -o -r postgres >/dev/null 2>&1 || :
+useradd -M -n -g postgres -o -r -d /var/lib/pgxl -s /bin/bash \
+        -c "Postgres-XL Server" -u 26 postgres >/dev/null 2>&1 || :
 
 %post server
+/sbin/ldconfig
 if [ $1 -eq 1 ] ; then
     # Initial installation
     /bin/systemctl daemon-reload >/dev/null 2>&1 || :
+   %systemd_post pgxl-%{majorversion}.service
+   %tmpfiles_create
 fi
 # pgxl' .bash_profile.
 # We now don't install .bash_profile as we used to in pre 9.0. Instead, use cat,
 # so that package manager will be happy during upgrade to new major version.
 echo "[ -f /etc/profile ] && source /etc/profile
 PGDATA=/var/lib/pgxl/%{majorversion}/data
-export PGDATA" >  /var/lib/pgxl/.bash_profile
-chown pgxl: /var/lib/pgxl/.bash_profile
+export PGDATA
+# If you want to customize your settings,
+# Use the file below. This is not overridden
+# by the RPMS.
+[ -f /var/lib/pgxl/.pgxl_profile ] && source /var/lib/pgxl/.pgxl_profile" >  /var/lib/pgxl/.bash_profile
+chown postgres: /var/lib/pgxl/.bash_profile
+chmod 700 /var/lib/pgxl/.bash_profile
 
 ##%preun server
 if [ $1 -eq 0 ] ; then
@@ -581,105 +620,105 @@ if [ $1 -eq 0 ] ; then
 fi
 
 %postun server
+/sbin/ldconfig
 /bin/systemctl daemon-reload >/dev/null 2>&1 || :
 if [ $1 -ge 1 ] ; then
   # Package upgrade, not uninstall
   /bin/systemctl try-restart pgxl-%{majorversion}.service >/dev/null 2>&1 || :
 fi
-###########################################################################################################
-##%preun server
-##if [ $1 = 0 ] ; then
-##  /sbin/service postgresql-xl condstop >/dev/null 2>&1
-##  chkconfig --del postgresql-xl
-##fi
 
-##%postun server
-##/sbin/ldconfig 
-##if [ $1 -ge 1 ]; then
-##  /sbin/service postgresql-xl condrestart >/dev/null 2>&1
-##fi
-##############################################################################################
 %if %plperl
-%post   -p /sbin/ldconfig plperl
+%post   -p /sbin/ldconfig   plperl
 %postun -p /sbin/ldconfig   plperl
 %endif
 
 %if %plpython
-%post   -p /sbin/ldconfig plpython
+%post   -p /sbin/ldconfig   plpython
 %postun -p /sbin/ldconfig   plpython
 %endif
 
 %if %pltcl
-%post   -p /sbin/ldconfig pltcl
+%post   -p /sbin/ldconfig   pltcl
 %postun -p /sbin/ldconfig   pltcl
 %endif
 
-%if %test
-%post test
-chown -R pgxl:pgxl /usr/share/pgxl/test >/dev/null 2>&1 || :
-%endif
 
 # Create alternatives entries for common binaries and man files
 %post
-%{_sbindir}/update-alternatives --install /usr/bin/psql pgxl-psql %{pgxlbaseinstdir}/bin/psql 100
-%{_sbindir}/update-alternatives --install /usr/bin/clusterdb  pgxl-clusterdb  %{pgxlbaseinstdir}/bin/clusterdb 100
-%{_sbindir}/update-alternatives --install /usr/bin/createdb   pgxl-createdb   %{pgxlbaseinstdir}/bin/createdb 100
-%{_sbindir}/update-alternatives --install /usr/bin/createlang pgxl-createlang %{pgxlbaseinstdir}/bin/createlang 100
-%{_sbindir}/update-alternatives --install /usr/bin/createuser pgxl-createuser %{pgxlbaseinstdir}/bin/createuser 100
-%{_sbindir}/update-alternatives --install /usr/bin/dropdb     pgxl-dropdb     %{pgxlbaseinstdir}/bin/dropdb 100
-%{_sbindir}/update-alternatives --install /usr/bin/droplang   pgxl-droplang   %{pgxlbaseinstdir}/bin/droplang 100
-%{_sbindir}/update-alternatives --install /usr/bin/dropuser   pgxl-dropuser   %{pgxlbaseinstdir}/bin/dropuser 100
-%{_sbindir}/update-alternatives --install /usr/bin/pg_dump    pgxl-pg_dump    %{pgxlbaseinstdir}/bin/pg_dump 100
-%{_sbindir}/update-alternatives --install /usr/bin/pg_dumpall pgxl-pg_dumpall %{pgxlbaseinstdir}/bin/pg_dumpall 100
-%{_sbindir}/update-alternatives --install /usr/bin/pg_restore pgxl-pg_restore %{pgxlbaseinstdir}/bin/pg_restore 100
-%{_sbindir}/update-alternatives --install /usr/bin/reindexdb  pgxl-reindexdb  %{pgxlbaseinstdir}/bin/reindexdb 100
-%{_sbindir}/update-alternatives --install /usr/bin/vacuumdb   pgxl-vacuumdb   %{pgxlbaseinstdir}/bin/vacuumdb 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/clusterdb.1  pgxl-clusterdbman     %{pgxlbaseinstdir}/share/man/man1/clusterdb.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/createdb.1   pgxl-createdbman   %{pgxlbaseinstdir}/share/man/man1/createdb.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/createlang.1 pgxl-createlangman    %{pgxlbaseinstdir}/share/man/man1/createlang.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/createuser.1 pgxl-createuserman    %{pgxlbaseinstdir}/share/man/man1/createuser.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/dropdb.1     pgxl-dropdbman        %{pgxlbaseinstdir}/share/man/man1/dropdb.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/droplang.1   pgxl-droplangman   %{pgxlbaseinstdir}/share/man/man1/droplang.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/dropuser.1   pgxl-dropuserman   %{pgxlbaseinstdir}/share/man/man1/dropuser.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_dump.1    pgxl-pg_dumpman    %{pgxlbaseinstdir}/share/man/man1/pg_dump.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_dumpall.1 pgxl-pg_dumpallman    %{pgxlbaseinstdir}/share/man/man1/pg_dumpall.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_restore.1 pgxl-pg_restoreman    %{pgxlbaseinstdir}/share/man/man1/pg_restore.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/psql.1     pgxl-psqlman          %{pgxlbaseinstdir}/share/man/man1/psql.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/reindexdb.1  pgxl-reindexdbman     %{pgxlbaseinstdir}/share/man/man1/reindexdb.1 100
-%{_sbindir}/update-alternatives --install /usr/share/man/man1/vacuumdb.1   pgxl-vacuumdbman   %{pgxlbaseinstdir}/share/man/man1/vacuumdb.1 100
+%{_sbindir}/update-alternatives --install /usr/bin/psql pgxl-psql %{pgbaseinstdir}/bin/psql 100
+%{_sbindir}/update-alternatives --install /usr/bin/clusterdb  pgxl-clusterdb  %{pgbaseinstdir}/bin/clusterdb 100
+%{_sbindir}/update-alternatives --install /usr/bin/createdb   pgxl-createdb   %{pgbaseinstdir}/bin/createdb 100
+%{_sbindir}/update-alternatives --install /usr/bin/createlang pgxl-createlang %{pgbaseinstdir}/bin/createlang 100
+%{_sbindir}/update-alternatives --install /usr/bin/createuser pgxl-createuser %{pgbaseinstdir}/bin/createuser 100
+%{_sbindir}/update-alternatives --install /usr/bin/dropdb     pgxl-dropdb     %{pgbaseinstdir}/bin/dropdb 100
+%{_sbindir}/update-alternatives --install /usr/bin/droplang   pgxl-droplang   %{pgbaseinstdir}/bin/droplang 100
+%{_sbindir}/update-alternatives --install /usr/bin/dropuser   pgxl-dropuser   %{pgbaseinstdir}/bin/dropuser 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_basebackup pgxl_basebackup  %{pgbaseinstdir}/bin/pg_basebackup 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_basebackupman pgxl_basebackupman  %{pgbaseinstdir}/bin/pg_basebackupman 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_dump    pgxl-pg_dump    %{pgbaseinstdir}/bin/pg_dump 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_dumpall pgxl-pg_dumpall %{pgbaseinstdir}/bin/pg_dumpall 100
+%{_sbindir}/update-alternatives --install /usr/bin/pg_restore pgxl-pg_restore %{pgbaseinstdir}/bin/pg_restore 100
+%{_sbindir}/update-alternatives --install /usr/bin/reindexdb  pgxl-reindexdb  %{pgbaseinstdir}/bin/reindexdb 100
+%{_sbindir}/update-alternatives --install /usr/bin/vacuumdb   pgxl-vacuumdb   %{pgbaseinstdir}/bin/vacuumdb 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/clusterdb.1  pgxl-clusterdbman     %{pgbaseinstdir}/share/man/man1/clusterdb.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/createdb.1   pgxl-createdbman   %{pgbaseinstdir}/share/man/man1/createdb.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/createlang.1 pgxl-createlangman    %{pgbaseinstdir}/share/man/man1/createlang.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/createuser.1 pgxl-createuserman    %{pgbaseinstdir}/share/man/man1/createuser.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/dropdb.1     pgxl-dropdbman        %{pgbaseinstdir}/share/man/man1/dropdb.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/droplang.1   pgxl-droplangman   %{pgbaseinstdir}/share/man/man1/droplang.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/dropuser.1   pgxl-dropuserman   %{pgbaseinstdir}/share/man/man1/dropuser.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_dump.1    pgxl-pg_dumpman    %{pgbaseinstdir}/share/man/man1/pg_dump.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_dumpall.1 pgxl-pg_dumpallman    %{pgbaseinstdir}/share/man/man1/pg_dumpall.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/pg_restore.1 pgxl-pg_restoreman    %{pgbaseinstdir}/share/man/man1/pg_restore.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/psql.1     pgxl-psqlman          %{pgbaseinstdir}/share/man/man1/psql.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/reindexdb.1  pgxl-reindexdbman     %{pgbaseinstdir}/share/man/man1/reindexdb.1 100
+%{_sbindir}/update-alternatives --install /usr/share/man/man1/vacuumdb.1   pgxl-vacuumdbman   %{pgbaseinstdir}/share/man/man1/vacuumdb.1 100
+
+%post libs
+%{_sbindir}/update-alternatives --install /etc/ld.so.conf.d/pgxl-libs.conf   pgxl-ld-conf   %{pgbaseinstdir}/share/pgxl-%{majorversion}-libs.conf %{packageversion}0
+/sbin/ldconfig
 
 # Drop alternatives entries for common binaries and man files
 %postun
 if [ "$1" -eq 0 ]
   then
-        # Only remove these links if the package is completely removed from the system (vs.just being upgraded)
-  %{_sbindir}/update-alternatives --remove pgxl-psql    %{pgxlbaseinstdir}/bin/psql
-  %{_sbindir}/update-alternatives --remove pgxl-clusterdb %{pgxlbaseinstdir}/bin/clusterdb
-  %{_sbindir}/update-alternatives --remove pgxl-clusterdbman  %{pgxlbaseinstdir}/share/man/man1/clusterdb.1
-  %{_sbindir}/update-alternatives --remove pgxl-createdb    %{pgxlbaseinstdir}/bin/createdb
-  %{_sbindir}/update-alternatives --remove pgxl-createdbman %{pgxlbaseinstdir}/share/man/man1/createdb.1
-  %{_sbindir}/update-alternatives --remove pgxl-createlang  %{pgxlbaseinstdir}/bin/createlang
-  %{_sbindir}/update-alternatives --remove pgxl-createlangman %{pgxlbaseinstdir}/share/man/man1/createlang.1
-  %{_sbindir}/update-alternatives --remove pgxl-createuser  %{pgxlbaseinstdir}/bin/createuser
-  %{_sbindir}/update-alternatives --remove pgxl-createuserman %{pgxlbaseinstdir}/share/man/man1/createuser.1
-  %{_sbindir}/update-alternatives --remove pgxl-dropdb    %{pgxlbaseinstdir}/bin/dropdb
-  %{_sbindir}/update-alternatives --remove pgxl-dropdbman %{pgxlbaseinstdir}/share/man/man1/dropdb.1
-  %{_sbindir}/update-alternatives --remove pgxl-droplang    %{pgxlbaseinstdir}/bin/droplang
-  %{_sbindir}/update-alternatives --remove pgxl-droplangman %{pgxlbaseinstdir}/share/man/man1/droplang.1
-  %{_sbindir}/update-alternatives --remove pgxl-dropuser    %{pgxlbaseinstdir}/bin/dropuser
-  %{_sbindir}/update-alternatives --remove pgxl-dropuserman %{pgxlbaseinstdir}/share/man/man1/dropuser.1
-  %{_sbindir}/update-alternatives --remove pgxl-pg_dump   %{pgxlbaseinstdir}/bin/pg_dump
-  %{_sbindir}/update-alternatives --remove pgxl-pg_dumpall  %{pgxlbaseinstdir}/bin/pg_dumpall
-  %{_sbindir}/update-alternatives --remove pgxl-pg_dumpallman %{pgxlbaseinstdir}/share/man/man1/pg_dumpall.1
-  %{_sbindir}/update-alternatives --remove pgxl-pg_dumpman  %{pgxlbaseinstdir}/share/man/man1/pg_dump.1
-  %{_sbindir}/update-alternatives --remove pgxl-pg_restore  %{pgxlbaseinstdir}/bin/pg_restore
-  %{_sbindir}/update-alternatives --remove pgxl-pg_restoreman %{pgxlbaseinstdir}/share/man/man1/pg_restore.1
-  %{_sbindir}/update-alternatives --remove pgxl-psqlman   %{pgxlbaseinstdir}/share/man/man1/psql.1
-  %{_sbindir}/update-alternatives --remove pgxl-reindexdb %{pgxlbaseinstdir}/bin/reindexdb
-  %{_sbindir}/update-alternatives --remove pgxl-reindexdbman  %{pgxlbaseinstdir}/share/man/man1/reindexdb.1
-  %{_sbindir}/update-alternatives --remove pgxl-vacuumdb    %{pgxlbaseinstdir}/bin/vacuumdb
-  %{_sbindir}/update-alternatives --remove pgxl-vacuumdbman %{pgxlbaseinstdir}/share/man/man1/vacuumdb.1
+    # Only remove these links if the package is completely removed from the system (vs.just being upgraded)
+    %{_sbindir}/update-alternatives --remove pgxl-psql              %{pgbaseinstdir}/bin/psql
+    %{_sbindir}/update-alternatives --remove pgxl-clusterdb         %{pgbaseinstdir}/bin/clusterdb
+    %{_sbindir}/update-alternatives --remove pgxl-clusterdbman      %{pgbaseinstdir}/share/man/man1/clusterdb.1
+    %{_sbindir}/update-alternatives --remove pgxl-createdb          %{pgbaseinstdir}/bin/createdb
+    %{_sbindir}/update-alternatives --remove pgxl-createdbman       %{pgbaseinstdir}/share/man/man1/createdb.1
+    %{_sbindir}/update-alternatives --remove pgxl-createlang        %{pgbaseinstdir}/bin/createlang
+    %{_sbindir}/update-alternatives --remove pgxl-createlangman     %{pgbaseinstdir}/share/man/man1/createlang.1
+    %{_sbindir}/update-alternatives --remove pgxl-createuser        %{pgbaseinstdir}/bin/createuser
+    %{_sbindir}/update-alternatives --remove pgxl-createuserman     %{pgbaseinstdir}/share/man/man1/createuser.1
+    %{_sbindir}/update-alternatives --remove pgxl-dropdb            %{pgbaseinstdir}/bin/dropdb
+    %{_sbindir}/update-alternatives --remove pgxl-dropdbman         %{pgbaseinstdir}/share/man/man1/dropdb.1
+    %{_sbindir}/update-alternatives --remove pgxl-droplang          %{pgbaseinstdir}/bin/droplang
+    %{_sbindir}/update-alternatives --remove pgxl-droplangman       %{pgbaseinstdir}/share/man/man1/droplang.1
+    %{_sbindir}/update-alternatives --remove pgxl-dropuser          %{pgbaseinstdir}/bin/dropuser
+    %{_sbindir}/update-alternatives --remove pgxl-dropuserman       %{pgbaseinstdir}/share/man/man1/dropuser.1
+    %{_sbindir}/update-alternatives --remove pgxl-pg_basebackup     %{pgbaseinstdir}/bin/pg_basebackup
+    %{_sbindir}/update-alternatives --remove pgxl-pg_basebackupman  %{pgbaseinstdir}/bin/pg_basebackupman
+    %{_sbindir}/update-alternatives --remove pgxl-pg_dump           %{pgbaseinstdir}/bin/pg_dump
+    %{_sbindir}/update-alternatives --remove pgxl-pg_dumpall        %{pgbaseinstdir}/bin/pg_dumpall
+    %{_sbindir}/update-alternatives --remove pgxl-pg_dumpallman     %{pgbaseinstdir}/share/man/man1/pg_dumpall.1
+    %{_sbindir}/update-alternatives --remove pgxl-pg_dumpman        %{pgbaseinstdir}/share/man/man1/pg_dump.1
+    %{_sbindir}/update-alternatives --remove pgxl-pg_restore        %{pgbaseinstdir}/bin/pg_restore
+    %{_sbindir}/update-alternatives --remove pgxl-pg_restoreman     %{pgbaseinstdir}/share/man/man1/pg_restore.1
+    %{_sbindir}/update-alternatives --remove pgxl-psqlman           %{pgbaseinstdir}/share/man/man1/psql.1
+    %{_sbindir}/update-alternatives --remove pgxl-reindexdb         %{pgbaseinstdir}/bin/reindexdb
+    %{_sbindir}/update-alternatives --remove pgxl-reindexdbman      %{pgbaseinstdir}/share/man/man1/reindexdb.1
+    %{_sbindir}/update-alternatives --remove pgxl-vacuumdb          %{pgbaseinstdir}/bin/vacuumdb
+    %{_sbindir}/update-alternatives --remove pgxl-vacuumdbman       %{pgbaseinstdir}/share/man/man1/vacuumdb.1
 fi
+
+%postun libs
+if [ "$1" -eq 0 ];then
+  %{_sbindir}/update-alternatives --remove pgxl-ld-conf          %{pgbaseinstdir}/share/pgxl-%{majorversion}-libs.conf
+  /sbin/ldconfig
+fi
+
 
 %clean
 rm -rf %{buildroot}
@@ -687,276 +726,330 @@ rm -rf %{buildroot}
 # FILES section.
 
 %files -f pg_main.lst
-%defattr(-,pgxl,pgxl)
-#%defattr(-,root,root)
+#%defattr(-,pgxl,pgxl)
+%defattr(-,root,root)
 %doc doc/KNOWN_BUGS doc/MISSING_FEATURES
 %doc COPYRIGHT doc/bug.template
 %doc README.rpm-dist
-%{pgxlbaseinstdir}/bin/clusterdb
-%{pgxlbaseinstdir}/bin/createdb
-%{pgxlbaseinstdir}/bin/createlang
-%{pgxlbaseinstdir}/bin/createuser
-%{pgxlbaseinstdir}/bin/dropdb
-%{pgxlbaseinstdir}/bin/droplang
-%{pgxlbaseinstdir}/bin/dropuser
-#%{pgxlbaseinstdir}/bin/makesgml
-%{pgxlbaseinstdir}/bin/pg_basebackup
-%{pgxlbaseinstdir}/bin/pg_config
-%{pgxlbaseinstdir}/bin/pg_dump
-%{pgxlbaseinstdir}/bin/pg_dumpall
-%{pgxlbaseinstdir}/bin/pg_restore
-%{pgxlbaseinstdir}/bin/pg_test_fsync
-%{pgxlbaseinstdir}/bin/psql
-%{pgxlbaseinstdir}/bin/reindexdb
-%{pgxlbaseinstdir}/bin/vacuumdb
-%{pgxlbaseinstdir}/share/man/man1/clusterdb.*
-%{pgxlbaseinstdir}/share/man/man1/createdb.*
-%{pgxlbaseinstdir}/share/man/man1/createlang.*
-%{pgxlbaseinstdir}/share/man/man1/createuser.*
-%{pgxlbaseinstdir}/share/man/man1/dropdb.*
-%{pgxlbaseinstdir}/share/man/man1/droplang.*
-%{pgxlbaseinstdir}/share/man/man1/dropuser.*
-%{pgxlbaseinstdir}/share/man/man1/pg_basebackup.*
-%{pgxlbaseinstdir}/share/man/man1/pg_config.*
-%{pgxlbaseinstdir}/share/man/man1/pg_dump.*
-%{pgxlbaseinstdir}/share/man/man1/pg_dumpall.*
-%{pgxlbaseinstdir}/share/man/man1/pg_restore.*
-%{pgxlbaseinstdir}/share/man/man1/psql.*
-%{pgxlbaseinstdir}/share/man/man1/reindexdb.*
-%{pgxlbaseinstdir}/share/man/man1/vacuumdb.*
-%{pgxlbaseinstdir}/share/man/man3/*
-%{pgxlbaseinstdir}/share/man/man7/*
+%{pgbaseinstdir}/bin/clusterdb
+%{pgbaseinstdir}/bin/createdb
+%{pgbaseinstdir}/bin/createlang
+%{pgbaseinstdir}/bin/createuser
+%{pgbaseinstdir}/bin/dropdb
+%{pgbaseinstdir}/bin/droplang
+%{pgbaseinstdir}/bin/dropuser
+%{pgbaseinstdir}/bin/pgbench
+%{pgbaseinstdir}/bin/pg_archivecleanup
+%{pgbaseinstdir}/bin/pg_basebackup
+%{pgbaseinstdir}/bin/pg_config
+%{pgbaseinstdir}/bin/pg_dump
+%{pgbaseinstdir}/bin/pg_dumpall
+%{pgbaseinstdir}/bin/pg_isready
+%{pgbaseinstdir}/bin/pg_restore
+%{pgbaseinstdir}/bin/pg_rewind
+%{pgbaseinstdir}/bin/pg_test_fsync
+%{pgbaseinstdir}/bin/pg_test_timing
+%{pgbaseinstdir}/bin/pg_receivexlog
+%{pgbaseinstdir}/bin/pg_upgrade
+%{pgbaseinstdir}/bin/pg_xlogdump
+%{pgbaseinstdir}/bin/psql
+%{pgbaseinstdir}/bin/reindexdb
+%{pgbaseinstdir}/bin/vacuumdb
+%{pgbaseinstdir}/share/man/man1/clusterdb.*
+%{pgbaseinstdir}/share/man/man1/createdb.*
+%{pgbaseinstdir}/share/man/man1/createlang.*
+%{pgbaseinstdir}/share/man/man1/createuser.*
+%{pgbaseinstdir}/share/man/man1/dropdb.*
+%{pgbaseinstdir}/share/man/man1/droplang.*
+%{pgbaseinstdir}/share/man/man1/dropuser.*
+%{pgbaseinstdir}/share/man/man1/pgbench.1
+%{pgbaseinstdir}/share/man/man1/pg_archivecleanup.1
+%{pgbaseinstdir}/share/man/man1/pg_basebackup.*
+%{pgbaseinstdir}/share/man/man1/pg_config.*
+%{pgbaseinstdir}/share/man/man1/pg_dump.*
+%{pgbaseinstdir}/share/man/man1/pg_dumpall.*
+%{pgbaseinstdir}/share/man/man1/pg_isready.1
+%{pgbaseinstdir}/share/man/man1/pg_receivexlog.1
+%{pgbaseinstdir}/share/man/man1/pg_restore.*
+%{pgbaseinstdir}/share/man/man1/pg_rewind.1
+%{pgbaseinstdir}/share/man/man1/pg_test_fsync.1
+%{pgbaseinstdir}/share/man/man1/pg_test_timing.1
+%{pgbaseinstdir}/share/man/man1/pg_upgrade.1
+%{pgbaseinstdir}/share/man/man1/pg_xlogdump.1
+%{pgbaseinstdir}/share/man/man1/psql.*
+%{pgbaseinstdir}/share/man/man1/reindexdb.*
+%{pgbaseinstdir}/share/man/man1/vacuumdb.*
+%{pgbaseinstdir}/share/man/man3/*
+%{pgbaseinstdir}/share/man/man7/*
+%{pgbaseinstdir}/share/locale/de/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/es/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/fr/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/it/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/ko/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/pl/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/pt_BR/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/ru/LC_MESSAGES/pg_rewind-9.5.mo
+%{pgbaseinstdir}/share/locale/zh_CN/LC_MESSAGES/pg_rewind-9.5.mo
 
 %files docs
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
+%defattr(-,root,root)
 %doc doc/src/*
 %doc *-A4.pdf
 %doc src/tutorial
 %doc doc/html
 
 %files contrib
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
-%{pgxlbaseinstdir}/lib/_int.so
-%{pgxlbaseinstdir}/lib/adminpack.so
-%{pgxlbaseinstdir}/lib/auth_delay.so
-%{pgxlbaseinstdir}/lib/autoinc.so
-%{pgxlbaseinstdir}/lib/auto_explain.so
-%{pgxlbaseinstdir}/lib/btree_gin.so
-%{pgxlbaseinstdir}/lib/btree_gist.so
-%{pgxlbaseinstdir}/lib/chkpass.so
-%{pgxlbaseinstdir}/lib/citext.so
-%{pgxlbaseinstdir}/lib/cube.so
-%{pgxlbaseinstdir}/lib/dblink.so
-%{pgxlbaseinstdir}/lib/earthdistance.so
-%{pgxlbaseinstdir}/lib/file_fdw.so*
-%{pgxlbaseinstdir}/lib/fuzzystrmatch.so
-%{pgxlbaseinstdir}/lib/insert_username.so
-%{pgxlbaseinstdir}/lib/isn.so
-%{pgxlbaseinstdir}/lib/hstore.so
-%{pgxlbaseinstdir}/lib/passwordcheck.so
-%{pgxlbaseinstdir}/lib/pg_freespacemap.so
-%{pgxlbaseinstdir}/lib/pg_stat_statements.so
-%{pgxlbaseinstdir}/lib/pgrowlocks.so
-%{pgxlbaseinstdir}/lib/sslinfo.so
-%{pgxlbaseinstdir}/lib/lo.so
-%{pgxlbaseinstdir}/lib/ltree.so
-%{pgxlbaseinstdir}/lib/moddatetime.so
-%{pgxlbaseinstdir}/lib/pageinspect.so
-%{pgxlbaseinstdir}/lib/pgcrypto.so
-%{pgxlbaseinstdir}/lib/pgstattuple.so
-%{pgxlbaseinstdir}/lib/pg_buffercache.so
-%{pgxlbaseinstdir}/lib/pg_trgm.so
-%{pgxlbaseinstdir}/lib/refint.so
-%{pgxlbaseinstdir}/lib/seg.so
-%{pgxlbaseinstdir}/lib/sepgsql.so
-%{pgxlbaseinstdir}/lib/tablefunc.so
-%{pgxlbaseinstdir}/lib/timetravel.so
-%{pgxlbaseinstdir}/lib/unaccent.so
+%defattr(-,root,root)
+%doc %{pgbaseinstdir}/doc/extension/*.example
+%{pgbaseinstdir}/lib/_int.so
+%{pgbaseinstdir}/lib/adminpack.so
+%{pgbaseinstdir}/lib/auth_delay.so
+%{pgbaseinstdir}/lib/autoinc.so
+%{pgbaseinstdir}/lib/auto_explain.so
+%{pgbaseinstdir}/lib/btree_gin.so
+%{pgbaseinstdir}/lib/btree_gist.so
+%{pgbaseinstdir}/lib/chkpass.so
+%{pgbaseinstdir}/lib/citext.so
+%{pgbaseinstdir}/lib/cube.so
+%{pgbaseinstdir}/lib/dblink.so
+%{pgbaseinstdir}/lib/earthdistance.so
+%{pgbaseinstdir}/lib/file_fdw.so*
+%{pgbaseinstdir}/lib/fuzzystrmatch.so
+%{pgbaseinstdir}/lib/insert_username.so
+%{pgbaseinstdir}/lib/isn.so
+%{pgbaseinstdir}/lib/hstore.so
+%if %plperl
+%{pgbaseinstdir}/lib/hstore_plperl.so
+%endif
+%if %plpython
+%{pgbaseinstdir}/lib/hstore_plpython2.so
+%endif
+%{pgbaseinstdir}/lib/lo.so
+%{pgbaseinstdir}/lib/ltree.so
+%if %plpython
+%{pgbaseinstdir}/lib/ltree_plpython2.so
+%endif
+%{pgbaseinstdir}/lib/moddatetime.so
+%{pgbaseinstdir}/lib/pageinspect.so
+%{pgbaseinstdir}/lib/passwordcheck.so
+%{pgbaseinstdir}/lib/pgcrypto.so
+%{pgbaseinstdir}/lib/pgrowlocks.so
+%{pgbaseinstdir}/lib/pgstattuple.so
+%{pgbaseinstdir}/lib/pg_buffercache.so
+%{pgbaseinstdir}/lib/pg_freespacemap.so
+%{pgbaseinstdir}/lib/pg_prewarm.so
+%{pgbaseinstdir}/lib/pg_stat_statements.so
+%{pgbaseinstdir}/lib/pg_trgm.so
+%{pgbaseinstdir}/lib/postgres_fdw.so
+%{pgbaseinstdir}/lib/refint.so
+%{pgbaseinstdir}/lib/seg.so
+%{pgbaseinstdir}/lib/sslinfo.so
+%if %selinux
+%{pgbaseinstdir}/lib/sepgsql.so
+%{pgbaseinstdir}/share/contrib/sepgsql.sql
+%endif
+%{pgbaseinstdir}/lib/tablefunc.so
+%{pgbaseinstdir}/lib/tcn.so
+%{pgbaseinstdir}/lib/test_decoding.so
+%{pgbaseinstdir}/lib/timetravel.so
+%{pgbaseinstdir}/lib/tsm_system_rows.so
+%{pgbaseinstdir}/lib/tsm_system_time.so
+%{pgbaseinstdir}/lib/unaccent.so
 %if %xml
-%{pgxlbaseinstdir}/lib/pgxml.so
+%{pgbaseinstdir}/lib/pgxml.so
 %endif
 %if %uuid
-%{pgxlbaseinstdir}/lib/uuid-ossp.so
+%{pgbaseinstdir}/lib/uuid-ossp.so
 %endif
-#%{pgxlbaseinstdir}/share/pgxc/extension/
-%{pgxlbaseinstdir}/share/extension/
-%{pgxlbaseinstdir}/bin/oid2name
-%{pgxlbaseinstdir}/bin/pgxc_clean
-%{pgxlbaseinstdir}/bin/vacuumlo
-%{pgxlbaseinstdir}/bin/pg_standby
-%{pgxlbaseinstdir}/bin/pgxc_monitor
-%{pgxlbaseinstdir}/share/man/man1/oid2name.1
-%{pgxlbaseinstdir}/share/man/man1/pg_isready.1
-%{pgxlbaseinstdir}/share/man/man1/pg_receivexlog.1
-%{pgxlbaseinstdir}/share/man/man1/pg_recvlogical.1
-%{pgxlbaseinstdir}/share/man/man1/pg_standby.1
-%{pgxlbaseinstdir}/share/man/man1/pg_test_*
-%{pgxlbaseinstdir}/share/man/man1/pg_test_*
-%{pgxlbaseinstdir}/share/man/man1/vacuumlo.1
-%{pgxlbaseinstdir}/share/contrib/sepgsql.sql
-
+%{pgbaseinstdir}/share/extension/adminpack*
+%{pgbaseinstdir}/share/extension/autoinc*
+%{pgbaseinstdir}/share/extension/btree_gin*
+%{pgbaseinstdir}/share/extension/btree_gist*
+%{pgbaseinstdir}/share/extension/chkpass*
+%{pgbaseinstdir}/share/extension/citext*
+%{pgbaseinstdir}/share/extension/cube*
+%{pgbaseinstdir}/share/extension/dblink*
+%{pgbaseinstdir}/share/extension/dict_int*
+%{pgbaseinstdir}/share/extension/dict_xsyn*
+%{pgbaseinstdir}/share/extension/earthdistance*
+%{pgbaseinstdir}/share/extension/file_fdw*
+%{pgbaseinstdir}/share/extension/fuzzystrmatch*
+%{pgbaseinstdir}/share/extension/hstore*
+%{pgbaseinstdir}/share/extension/insert_username*
+%{pgbaseinstdir}/share/extension/intagg*
+%{pgbaseinstdir}/share/extension/intarray*
+%{pgbaseinstdir}/share/extension/isn*
+%{pgbaseinstdir}/share/extension/lo*
+%{pgbaseinstdir}/share/extension/ltree*
+%{pgbaseinstdir}/share/extension/moddatetime*
+%{pgbaseinstdir}/share/extension/pageinspect*
+%{pgbaseinstdir}/share/extension/pg_buffercache*
+%{pgbaseinstdir}/share/extension/pg_freespacemap*
+%{pgbaseinstdir}/share/extension/pg_prewarm*
+%{pgbaseinstdir}/share/extension/pg_stat_statements*
+%{pgbaseinstdir}/share/extension/pg_trgm*
+%{pgbaseinstdir}/share/extension/pgcrypto*
+%{pgbaseinstdir}/share/extension/pgrowlocks*
+%{pgbaseinstdir}/share/extension/pgstattuple*
+%{pgbaseinstdir}/share/extension/postgres_fdw*
+%{pgbaseinstdir}/share/extension/refint*
+%{pgbaseinstdir}/share/extension/seg*
+%{pgbaseinstdir}/share/extension/sslinfo*
+%{pgbaseinstdir}/share/extension/tablefunc*
+%{pgbaseinstdir}/share/extension/tcn*
+%{pgbaseinstdir}/share/extension/timetravel*
+%{pgbaseinstdir}/share/extension/tsearch2*
+%{pgbaseinstdir}/share/extension/tsm_system_rows*
+%{pgbaseinstdir}/share/extension/tsm_system_time*
+%{pgbaseinstdir}/share/extension/unaccent*
+%if %uuid
+%{pgbaseinstdir}/share/extension/uuid-ossp*
+%endif
+%{pgbaseinstdir}/share/extension/xml2*
+%{pgbaseinstdir}/bin/oid2name
+%{pgbaseinstdir}/bin/vacuumlo
+%{pgbaseinstdir}/bin/pg_recvlogical
+%{pgbaseinstdir}/bin/pg_standby
+%{pgbaseinstdir}/share/man/man1/oid2name.1
+%{pgbaseinstdir}/share/man/man1/pg_recvlogical.1
+%{pgbaseinstdir}/share/man/man1/pg_standby.1
+%{pgbaseinstdir}/share/man/man1/vacuumlo.1
 
 %files libs -f pg_libpq5.lst
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
-%{pgxlbaseinstdir}/lib/libpq.so.*
-%{pgxlbaseinstdir}/lib/libecpg.so*
-%{pgxlbaseinstdir}/lib/libpgtypes.so.*
-%{pgxlbaseinstdir}/lib/libecpg_compat.so.*
-%{pgxlbaseinstdir}/lib/libpqwalreceiver.so
-
+%defattr(-,root,root)
+%{pgbaseinstdir}/lib/libpq.so.*
+%{pgbaseinstdir}/lib/libecpg.so*
+%{pgbaseinstdir}/lib/libpgtypes.so.*
+%{pgbaseinstdir}/lib/libecpg_compat.so.*
+%{pgbaseinstdir}/lib/libpqwalreceiver.so
 %config(noreplace) %{_sysconfdir}/ld.so.conf.d/pgxl-%{majorversion}-libs.conf
 
 %files server -f pg_server.lst
-%defattr(-,pgxl,pgxl)
-#%defattr(-,root,root)
+%defattr(-,root,root)
+%{pgbaseinstdir}/bin/pgxl%{packageversion}-setup
 %{_unitdir}/pgxl-%{majorversion}.service
-%{pgxlbaseinstdir}/bin/pgxl%{packageversion}-setup
 %if %pam
 %config(noreplace) /etc/pam.d/pgxl%{packageversion}
 %endif
-#%attr (755,root,root) %dir /etc/sysconfig/pgxl
-%attr (755,pgxl,pgxl) %dir /etc/sysconfig/pgxl
-%{pgxlbaseinstdir}/bin/initdb
-%{pgxlbaseinstdir}/bin/pg_controldata
-%{pgxlbaseinstdir}/bin/pg_ctl
-%{pgxlbaseinstdir}/bin/pg_resetxlog
-%{pgxlbaseinstdir}/bin/pg_isready
-%{pgxlbaseinstdir}/bin/pg_recvlogical
-%{pgxlbaseinstdir}/bin/pg_rewind
-%{pgxlbaseinstdir}/bin/pg_xlogdump
-%{pgxlbaseinstdir}/bin/postgres
-%{pgxlbaseinstdir}/bin/postmaster
-%{pgxlbaseinstdir}/bin/pgxc_ctl
-%{pgxlbaseinstdir}/bin/pg_receivexlog
-%{pgxlbaseinstdir}/bin/pg_test_timing
-%{pgxlbaseinstdir}/bin/pg_upgrade
-%{pgxlbaseinstdir}/bin/pgbench
-%{pgxlbaseinstdir}/bin/pg_archivecleanup
-%{pgxlbaseinstdir}/share/storm_catalog.sql
-%{pgxlbaseinstdir}/share/man/man1/initdb.*
-%{pgxlbaseinstdir}/share/man/man1/pg_controldata.*
-%{pgxlbaseinstdir}/share/man/man1/pg_ctl.*
-%{pgxlbaseinstdir}/share/man/man1/pg_resetxlog.*
-%{pgxlbaseinstdir}/share/man/man1/postgres.*
-%{pgxlbaseinstdir}/share/man/man1/postmaster.*
-%{pgxlbaseinstdir}/share/man/man1/pg_upgrade.1
-%{pgxlbaseinstdir}/share/man/man1/pg_xlogdump.1
-%{pgxlbaseinstdir}/share/man/man1/pgbench.1
-%{pgxlbaseinstdir}/share/man/man1/pg_archivecleanup.1
-%{pgxlbaseinstdir}/share/man/man1/pg_rewind.1
-%{pgxlbaseinstdir}/share/locale/de/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/es/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/fr/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/it/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/ko/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/pl/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/pt_BR/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/ru/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/locale/zh_CN/LC_MESSAGES/pg_rewind-9.5.mo
-%{pgxlbaseinstdir}/share/postgres.bki
-%{pgxlbaseinstdir}/share/postgres.description
-%{pgxlbaseinstdir}/share/postgres.shdescription
-%{pgxlbaseinstdir}/share/system_views.sql
-%{pgxlbaseinstdir}/share/*.sample
-%{pgxlbaseinstdir}/share/timezonesets/*
-%{pgxlbaseinstdir}/share/tsearch_data/*.affix
-%{pgxlbaseinstdir}/share/tsearch_data/*.dict
-%{pgxlbaseinstdir}/share/tsearch_data/*.ths
-%{pgxlbaseinstdir}/share/tsearch_data/*.rules
-%{pgxlbaseinstdir}/share/tsearch_data/*.stop
-%{pgxlbaseinstdir}/share/tsearch_data/*.syn
-%{pgxlbaseinstdir}/lib/dict_int.so
-%{pgxlbaseinstdir}/lib/dict_snowball.so
-%{pgxlbaseinstdir}/lib/dict_xsyn.so
-%{pgxlbaseinstdir}/lib/euc2004_sjis2004.so
-%{pgxlbaseinstdir}/lib/plpgsql.so
-%dir %{pgxlbaseinstdir}/share/extension
-%{pgxlbaseinstdir}/share/extension/plpgsql*
-#%{pgxlbaseinstdir}/lib/test_parser.so
-%{pgxlbaseinstdir}/lib/tsearch2.so
+%attr (755,root,root) %dir /etc/sysconfig/pgxl
+%{pgbaseinstdir}/bin/initdb
+%{pgbaseinstdir}/bin/pg_controldata
+%{pgbaseinstdir}/bin/pg_ctl
+%{pgbaseinstdir}/bin/pg_resetxlog
+%{pgbaseinstdir}/bin/postgres
+%{pgbaseinstdir}/bin/postmaster
+%{pgbaseinstdir}/bin/pgxc_ctl
+%{pgbaseinstdir}/bin/pgxc_clean
+%{pgbaseinstdir}/bin/pgxc_monitor
+%{pgbaseinstdir}/share/man/man1/initdb.*
+%{pgbaseinstdir}/share/man/man1/pg_controldata.*
+%{pgbaseinstdir}/share/man/man1/pg_ctl.*
+%{pgbaseinstdir}/share/man/man1/pg_resetxlog.*
+%{pgbaseinstdir}/share/man/man1/postgres.*
+%{pgbaseinstdir}/share/man/man1/postmaster.*
+%{pgbaseinstdir}/share/postgres.bki
+%{pgbaseinstdir}/share/postgres.description
+%{pgbaseinstdir}/share/postgres.shdescription
+%{pgbaseinstdir}/share/system_views.sql
+%{pgbaseinstdir}/share/*.sample
+%{pgbaseinstdir}/share/extension/stormstats*
+%{pgbaseinstdir}/share/storm_catalog.sql
+%{pgbaseinstdir}/share/timezonesets/*
+%{pgbaseinstdir}/share/tsearch_data/*.affix
+%{pgbaseinstdir}/share/tsearch_data/*.dict
+%{pgbaseinstdir}/share/tsearch_data/*.ths
+%{pgbaseinstdir}/share/tsearch_data/*.rules
+%{pgbaseinstdir}/share/tsearch_data/*.stop
+%{pgbaseinstdir}/share/tsearch_data/*.syn
+%{pgbaseinstdir}/lib/dict_int.so
+%{pgbaseinstdir}/lib/dict_snowball.so
+%{pgbaseinstdir}/lib/dict_xsyn.so
+%{pgbaseinstdir}/lib/euc2004_sjis2004.so
+%{pgbaseinstdir}/lib/plpgsql.so
+%dir %{pgbaseinstdir}/share/extension
+%{pgbaseinstdir}/share/extension/plpgsql*
+#%{pgbaseinstdir}/lib/test_parser.so
+%{pgbaseinstdir}/lib/tsearch2.so
+%{pgbaseinstdir}/lib/stormstats.so
 
-%dir %{pgxlbaseinstdir}/lib
-%dir %{pgxlbaseinstdir}/share
-%attr(700,pgxl,pgxl) %dir /var/lib/pgxl
-%attr(700,pgxl,pgxl) %dir /var/lib/pgxl/%{majorversion}
-%attr(700,pgxl,pgxl) %dir /var/lib/pgxl/%{majorversion}/data
-%attr(700,pgxl,pgxl) %dir /var/lib/pgxl/%{majorversion}/backups
-#%attr(644,pgxl,pgxl) %config(noreplace) /var/lib/pgxl/.bash_profile
-%{pgxlbaseinstdir}/lib/*_and_*.so
-%{pgxlbaseinstdir}/share/conversion_create.sql
-%{pgxlbaseinstdir}/share/information_schema.sql
-%{pgxlbaseinstdir}/share/snowball_create.sql
-%{pgxlbaseinstdir}/share/sql_features.txt
+
+%dir %{pgbaseinstdir}/lib
+%dir %{pgbaseinstdir}/share
+%attr(700,postgres,postgres) %dir /var/lib/pgxl
+%attr(700,postgres,postgres) %dir /var/lib/pgxl/%{majorversion}
+%attr(700,postgres,postgres) %dir /var/lib/pgxl/%{majorversion}/data
+%attr(700,postgres,postgres) %dir /var/lib/pgxl/%{majorversion}/backups
+#%attr(644,postgres,postgres) %config(noreplace) /var/lib/pgxl/.bash_profile
+%{pgbaseinstdir}/lib/*_and_*.so
+%{pgbaseinstdir}/share/conversion_create.sql
+%{pgbaseinstdir}/share/information_schema.sql
+%{pgbaseinstdir}/share/snowball_create.sql
+%{pgbaseinstdir}/share/sql_features.txt
 
 %files devel -f pg_devel.lst
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
-%{pgxlbaseinstdir}/include/*
-%{pgxlbaseinstdir}/bin/ecpg
-###%{pgxlbaseinstdir}/lib/libpq.so
-###%{pgxlbaseinstdir}/lib/libecpg.so
-###%{pgxlbaseinstdir}/lib/libpq.a
-###%{pgxlbaseinstdir}/lib/libecpg.a
-###%{pgxlbaseinstdir}/lib/libecpg_compat.so
-###%{pgxlbaseinstdir}/lib/libecpg_compat.a
-###%{pgxlbaseinstdir}/lib/libpgport.a
-###%{pgxlbaseinstdir}/lib/libpgtypes.so
-###%{pgxlbaseinstdir}/lib/libpgtypes.a
-################################################################%{pgxlbaseinstdir}/lib/pgxl/*
-%{pgxlbaseinstdir}/lib/*
-%{pgxlbaseinstdir}/share/man/man1/ecpg.*
+%defattr(-,root,root)
+%{pgbaseinstdir}/include/*
+%{pgbaseinstdir}/bin/ecpg
+%{pgbaseinstdir}/lib/libpq.so
+%{pgbaseinstdir}/lib/libecpg.so
+%{pgbaseinstdir}/lib/libpq.a
+%{pgbaseinstdir}/lib/libecpg.a
+%{pgbaseinstdir}/lib/libecpg_compat.so
+%{pgbaseinstdir}/lib/libecpg_compat.a
+%{pgbaseinstdir}/lib/libpgport.a
+%{pgbaseinstdir}/lib/libpgtypes.so
+%{pgbaseinstdir}/lib/libpgtypes.a
+%{pgbaseinstdir}/lib/libpgcommon.a
+%{pgbaseinstdir}/lib/pgxs/*
+%{pgbaseinstdir}/lib/pkgconfig/*
+%{pgbaseinstdir}/share/man/man1/ecpg.*
 
 %files gtm -f pg_devel.lst
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
-%{pgxlbaseinstdir}/bin/gtm
-%{pgxlbaseinstdir}/bin/gtm_ctl
-%{pgxlbaseinstdir}/bin/gtm_proxy
-%{pgxlbaseinstdir}/bin/initgtm
-%{pgxlbaseinstdir}/share/man/man1/gtm.1
-%{pgxlbaseinstdir}/share/man/man1/gtm_ctl.1
-%{pgxlbaseinstdir}/share/man/man1/gtm_proxy.1
-%{pgxlbaseinstdir}/share/man/man1/initgtm.1
+%defattr(-,root,root)
+%{pgbaseinstdir}/bin/gtm
+%{pgbaseinstdir}/bin/gtm_ctl
+%{pgbaseinstdir}/bin/gtm_proxy
+%{pgbaseinstdir}/bin/initgtm
+%{pgbaseinstdir}/share/man/man1/gtm.1
+%{pgbaseinstdir}/share/man/man1/gtm_ctl.1
+%{pgbaseinstdir}/share/man/man1/gtm_proxy.1
+%{pgbaseinstdir}/share/man/man1/initgtm.1
 
 %if %plperl
 %files plperl -f pg_plperl.lst
-#%defattr(-,root,root)
-%defattr(-,pgxl,pgxl)
-%{pgxlbaseinstdir}/lib/plperl.so
+%defattr(-,root,root)
+%{pgbaseinstdir}/lib/plperl.so
+%{pgbaseinstdir}/share/extension/plperl*
 %endif
 
 %if %pltcl
 %files pltcl -f pg_pltcl.lst
-
-%defattr(-,pgxl,pgxl)
-#%defattr(-,root,root)
-%{pgxlbaseinstdir}/lib/pltcl.so
-%{pgxlbaseinstdir}/bin/pltcl_delmod
-%{pgxlbaseinstdir}/bin/pltcl_listmod
-%{pgxlbaseinstdir}/bin/pltcl_loadmod
-%{pgxlbaseinstdir}/share/unknown.pltcl
+%defattr(-,root,root)
+%{pgbaseinstdir}/lib/pltcl.so
+%{pgbaseinstdir}/bin/pltcl_delmod
+%{pgbaseinstdir}/bin/pltcl_listmod
+%{pgbaseinstdir}/bin/pltcl_loadmod
+%{pgbaseinstdir}/share/unknown.pltcl
+%{pgbaseinstdir}/share/extension/pltcl*
 %endif
 
 %if %plpython
 %files plpython -f pg_plpython.lst
-%defattr(-,pgxl,pgxl)
-#%defattr(-,root,root)
-%{pgxlbaseinstdir}/lib/plpython*.so
+%defattr(-,root,root)
+%{pgbaseinstdir}/lib/plpython2.so
+%{pgbaseinstdir}/share/extension/plpython2u*
+%{pgbaseinstdir}/share/extension/plpythonu*
 %endif
 
 %if %test
 %files test
-%defattr(-,pgxl,pgxl)
-#%defattr(-,pgxl,pgxl)
-%attr(-,pgxl,pgxl) %{pgxlbaseinstdir}/lib/test/*
-%attr(-,pgxl,pgxl) %dir %{pgxlbaseinstdir}/lib/test
+%defattr(-,postgres,postgres)
+%attr(-,postgres,postgres) %{pgbaseinstdir}/lib/test/*
+%attr(-,postgres,postgres) %dir %{pgbaseinstdir}/lib/test
 %endif
 
 %changelog
-* Thu Dec 22 2016 Daehyung Lee <daehyung@gmail.com> - 9.5.1.4
+* Thu Dec 26 2016 Daehyung Lee <daehyung@gmail.com> - 9.5.1.4
 - Create for Postgres-XL 9.5 R1.4
 
 * Fri May 19 2013 ViVek Raghuwanshi <vivek.r@stormdb.com> - 1.0.2-1PGDG

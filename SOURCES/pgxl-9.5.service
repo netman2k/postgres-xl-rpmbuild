@@ -1,5 +1,5 @@
 [Unit]
-Description=Postgres-XL Database Server
+Description=Postgres-XL 9.5 Database Server
 After=syslog.target
 After=network.target
 
@@ -7,8 +7,8 @@ After=network.target
 #Type=forking
 Type=simple
 
-User=pgxl
-Group=pgxl
+User=postgres
+Group=postgres
 
 # Note: avoid inserting whitespace in these Environment= lines, or you may
 # break postgresql-setup.

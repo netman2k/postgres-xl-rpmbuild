@@ -22,4 +22,8 @@
 #include "ecpg_config_s390x.h"
 #elif defined(__s390__)
 #include "ecpg_config_s390.h"
+#elif defined(__sparc__) && defined(__arch64__)
+#include "ecpg_config_sparc64.h"
+#elif defined(__sparc__)
+#include "ecpg_config_sparc.h"
 #endif
